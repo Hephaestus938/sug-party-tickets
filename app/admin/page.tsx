@@ -58,6 +58,17 @@ interface Registration {
   } | null;
 }
 
+interface SponsorItem {
+  id: string;
+  name: string;
+  banner_url: string;
+  link_url: string | null;
+  category: string;
+  is_active: boolean;
+  expires_at: string | null;
+  created_at: string;
+}
+
 // 30-minute time intervals for dropdown selection
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
   const hour = Math.floor(i / 2);
@@ -73,7 +84,7 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 
 export default function AdminPage() {
   // ==========================================
-  // STATE MANAGEMENT (INSIDE COMPONENT BODY)
+  // STATE MANAGEMENT
   // ==========================================
 
   // Authentication State
@@ -107,9 +118,12 @@ export default function AdminPage() {
   const [eventSuccess, setEventSuccess] = useState(false);
 
   // Sponsor / Ad Placement State
+  const [postedSponsors, setPostedSponsors] = useState<SponsorItem[]>([]);
+  const [loadingSponsors, setLoadingSponsors] = useState(false);
   const [sponsorName, setSponsorName] = useState('');
   const [sponsorLink, setSponsorLink] = useState('');
   const [sponsorCategory, setSponsorCategory] = useState('Campus Business');
+  const [sponsorDurationDays, setSponsorDurationDays] = useState<number>(7); // Default 7 days
   const [sponsorFile, setSponsorFile] = useState<File | null>(null);
   const [uploadingSponsor, setUploadingSponsor] = useState(false);
 
@@ -123,6 +137,7 @@ export default function AdminPage() {
       if (session?.user) {
         fetchRegistrations();
         fetchPostedEvents();
+        fetchPostedSponsors();
       }
     }
 
@@ -133,6 +148,7 @@ export default function AdminPage() {
       if (session?.user) {
         fetchRegistrations();
         fetchPostedEvents();
+        fetchPostedSponsors();
       }
     });
 
@@ -212,7 +228,25 @@ export default function AdminPage() {
     }
   }
 
-  // 5. Update Registration Verification Status
+  // 5. Fetch sponsors/ads
+  async function fetchPostedSponsors() {
+    setLoadingSponsors(true);
+    try {
+      const { data, error } = await supabase
+        .from('sponsors')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPostedSponsors(data || []);
+    } catch (err) {
+      console.error('Error fetching sponsors:', err);
+    } finally {
+      setLoadingSponsors(false);
+    }
+  }
+
+  // 6. Update Registration Verification Status
   async function updateStatus(id: string, newStatus: 'approved' | 'rejected') {
     try {
       const { error } = await supabase
@@ -231,7 +265,7 @@ export default function AdminPage() {
     }
   }
 
-  // 6. Delete Event
+  // 7. Delete Event
   async function handleDeleteEvent(id: string, eventTitle: string) {
     if (!confirm(`Are you sure you want to delete "${eventTitle}"?`)) return;
 
@@ -247,7 +281,23 @@ export default function AdminPage() {
     }
   }
 
-  // 7. Create Event
+  // 8. Delete Sponsor/Ad
+  async function handleDeleteSponsor(id: string, sponsorName: string) {
+    if (!confirm(`Are you sure you want to delete the ad for "${sponsorName}"?`)) return;
+
+    try {
+      const { error } = await supabase.from('sponsors').delete().eq('id', id);
+      if (error) throw error;
+
+      setPostedSponsors((prev) => prev.filter((s) => s.id !== id));
+      alert('Sponsor ad deleted successfully.');
+    } catch (err) {
+      console.error('Failed to delete sponsor ad:', err);
+      alert('Error deleting sponsor ad.');
+    }
+  }
+
+  // 9. Create Event
   async function handleCreateEvent(e: React.FormEvent) {
     e.preventDefault();
     setCreatingEvent(true);
@@ -304,7 +354,7 @@ export default function AdminPage() {
     }
   }
 
-  // 8. Publish Sponsor / Campus Ad
+  // 10. Publish Sponsor / Campus Ad
   async function handleCreateSponsor(e: React.FormEvent) {
     e.preventDefault();
     if (!sponsorFile) return alert('Please upload a banner image');
@@ -319,12 +369,21 @@ export default function AdminPage() {
 
       const { data: publicUrlData } = supabase.storage.from('sponsors').getPublicUrl(fileName);
 
+      // Calculate expiration ISO date if duration is specified
+      let expiresAtIso: string | null = null;
+      if (sponsorDurationDays > 0) {
+        const expDate = new Date();
+        expDate.setDate(expDate.getDate() + Number(sponsorDurationDays));
+        expiresAtIso = expDate.toISOString();
+      }
+
       const { error: insertError } = await supabase.from('sponsors').insert([
         {
           name: sponsorName,
           link_url: sponsorLink || null,
           category: sponsorCategory,
           banner_url: publicUrlData.publicUrl,
+          expires_at: expiresAtIso,
           is_active: true,
         },
       ]);
@@ -335,6 +394,9 @@ export default function AdminPage() {
       setSponsorName('');
       setSponsorLink('');
       setSponsorFile(null);
+      setSponsorDurationDays(7);
+
+      fetchPostedSponsors();
     } catch (err) {
       console.error('Error publishing sponsor:', err);
       alert('Failed to publish sponsor banner.');
@@ -343,7 +405,7 @@ export default function AdminPage() {
     }
   }
 
-  // 9. Countdown calculator
+  // Countdown / Time remaining helper
   function getTimeRemaining(dateStr: string, timeStr: string) {
     if (!dateStr) return { text: 'Scheduled', isExpired: false, isNear: false };
 
@@ -369,6 +431,15 @@ export default function AdminPage() {
     } else {
       return { text: `${minutes}m remaining`, isExpired: false, isNear: true };
     }
+  }
+
+  // Ad Expiration status helper
+  function getAdExpiryStatus(expiresAt: string | null) {
+    if (!expiresAt) return { text: 'Unlimited', isExpired: false };
+    const diff = new Date(expiresAt).getTime() - new Date().getTime();
+    if (diff <= 0) return { text: 'Expired', isExpired: true };
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+    return { text: `Expires in ${days}d`, isExpired: false };
   }
 
   const filteredRegistrations = registrations.filter((reg) => {
@@ -501,7 +572,10 @@ export default function AdminPage() {
               Post New Event
             </button>
             <button
-              onClick={() => setActiveTab('sponsors')}
+              onClick={() => {
+                setActiveTab('sponsors');
+                fetchPostedSponsors();
+              }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                 activeTab === 'sponsors'
                   ? 'bg-purple-600 text-white shadow-lg'
@@ -509,7 +583,7 @@ export default function AdminPage() {
               }`}
             >
               <Megaphone className="w-3.5 h-3.5 text-amber-400" />
-              Manage Ads
+              Manage Ads ({postedSponsors.length})
             </button>
             <button
               onClick={handleLogout}
@@ -924,74 +998,183 @@ export default function AdminPage() {
 
         {/* TAB 4: MANAGE ADS & SPONSORS */}
         {activeTab === 'sponsors' && (
-          <div className="max-w-2xl mx-auto bg-slate-900/90 border border-purple-800/50 rounded-3xl p-6 md:p-8 shadow-2xl">
-            <h2 className="text-xl font-bold mb-1 flex items-center gap-2">
-              <Megaphone className="w-5 h-5 text-amber-400" />
-              Publish Campus Ad / Sponsor Banner
-            </h2>
-            <p className="text-slate-400 text-xs mb-6">Upload partner business graphic banners to display on student portal pages.</p>
+          <div className="space-y-8">
+            {/* AD CREATION FORM */}
+            <div className="max-w-2xl mx-auto bg-slate-900/90 border border-purple-800/50 rounded-3xl p-6 md:p-8 shadow-2xl">
+              <h2 className="text-xl font-bold mb-1 flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-amber-400" />
+                Publish Campus Ad / Sponsor Banner
+              </h2>
+              <p className="text-slate-400 text-xs mb-6">Upload partner graphic banners with automated expiration time limits.</p>
 
-            <form onSubmit={handleCreateSponsor} className="space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <form onSubmit={handleCreateSponsor} className="space-y-4 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Business / Partner Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={sponsorName}
+                      onChange={(e) => setSponsorName(e.target.value)}
+                      placeholder="e.g. Ifite Campus Lounge"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Category</label>
+                    <select
+                      value={sponsorCategory}
+                      onChange={(e) => setSponsorCategory(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                    >
+                      <option value="Campus Business">Campus Business</option>
+                      <option value="Food & Drinks">Food & Drinks</option>
+                      <option value="Hostel & Rentals">Hostel & Rentals</option>
+                      <option value="Shuttle & Logistics">Shuttle & Logistics</option>
+                      <option value="Brand Partner">Brand Partner</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Website or WhatsApp Link (Optional)</label>
+                    <input
+                      type="url"
+                      value={sponsorLink}
+                      onChange={(e) => setSponsorLink(e.target.value)}
+                      placeholder="https://wa.me/2348012345678"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* TIME LIMIT / DURATION DROPDOWN */}
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Ad Duration / Time Limit</label>
+                    <select
+                      value={sponsorDurationDays}
+                      onChange={(e) => setSponsorDurationDays(Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500 cursor-pointer"
+                    >
+                      <option value={3}>3 Days</option>
+                      <option value={7}>7 Days (1 Week)</option>
+                      <option value={14}>14 Days (2 Weeks)</option>
+                      <option value={30}>30 Days (1 Month)</option>
+                      <option value={0}>Unlimited (No Expiration)</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-slate-300 mb-1 font-medium">Business / Partner Name</label>
+                  <label className="block text-slate-300 mb-1 font-medium">Banner Image Graphic</label>
                   <input
-                    type="text"
+                    type="file"
+                    accept="image/*"
                     required
-                    value={sponsorName}
-                    onChange={(e) => setSponsorName(e.target.value)}
-                    placeholder="e.g. Ifite Campus Lounge"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                    onChange={(e) => setSponsorFile(e.target.files?.[0] || null)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-purple-900/60 file:text-purple-300 hover:file:bg-purple-800"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-slate-300 mb-1 font-medium">Category</label>
-                  <select
-                    value={sponsorCategory}
-                    onChange={(e) => setSponsorCategory(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
-                  >
-                    <option value="Campus Business">Campus Business</option>
-                    <option value="Food & Drinks">Food & Drinks</option>
-                    <option value="Hostel & Rentals">Hostel & Rentals</option>
-                    <option value="Shuttle & Logistics">Shuttle & Logistics</option>
-                    <option value="Brand Partner">Brand Partner</option>
-                  </select>
+                <button
+                  type="submit"
+                  disabled={uploadingSponsor}
+                  className="w-full mt-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-xl shadow-lg hover:from-purple-500 hover:to-pink-500 transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
+                >
+                  {uploadingSponsor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Megaphone className="w-4 h-4" />}
+                  <span>{uploadingSponsor ? 'Uploading Banner...' : 'Publish Sponsor Banner Live'}</span>
+                </button>
+              </form>
+            </div>
+
+            {/* LIST OF ACTIVE / POSTED ADS WITH DELETE BUTTON */}
+            <div>
+              <div className="flex items-center justify-between bg-slate-900/80 border border-slate-800 p-4 rounded-2xl mb-6">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-amber-400" />
+                  Active Posted Ads & Sponsors ({postedSponsors.length})
+                </h3>
+
+                <button
+                  onClick={fetchPostedSponsors}
+                  className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingSponsors ? 'animate-spin' : ''}`} />
+                  Refresh Ads
+                </button>
+              </div>
+
+              {loadingSponsors ? (
+                <div className="py-20 text-center text-slate-500 flex flex-col items-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-500 mb-2" />
+                  <p className="text-xs">Fetching posted ads...</p>
                 </div>
-              </div>
+              ) : postedSponsors.length === 0 ? (
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-12 text-center text-slate-500 text-xs">
+                  No ad banners published yet. Use the form above to add your first sponsor!
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {postedSponsors.map((sp) => {
+                    const expiry = getAdExpiryStatus(sp.expires_at);
 
-              <div>
-                <label className="block text-slate-300 mb-1 font-medium">Website or WhatsApp Link (Optional)</label>
-                <input
-                  type="url"
-                  value={sponsorLink}
-                  onChange={(e) => setSponsorLink(e.target.value)}
-                  placeholder="https://wa.me/2348012345678"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
-                />
-              </div>
+                    return (
+                      <div
+                        key={sp.id}
+                        className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden flex flex-col justify-between shadow-lg relative"
+                      >
+                        <div>
+                          <div className="h-36 w-full overflow-hidden bg-slate-950 relative">
+                            <img src={sp.banner_url} alt={sp.name} className="w-full h-full object-cover" />
+                            <div className="absolute top-2 right-2 bg-slate-950/80 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-amber-300 border border-amber-500/30">
+                              {sp.category}
+                            </div>
+                          </div>
 
-              <div>
-                <label className="block text-slate-300 mb-1 font-medium">Banner Image Graphic</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  required
-                  onChange={(e) => setSponsorFile(e.target.files?.[0] || null)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-purple-900/60 file:text-purple-300 hover:file:bg-purple-800"
-                />
-              </div>
+                          <div className="p-5">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className="text-base font-bold text-white">{sp.name}</span>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                  expiry.isExpired
+                                    ? 'bg-rose-950/80 border-rose-800 text-rose-400'
+                                    : sp.expires_at
+                                    ? 'bg-purple-950/80 border-purple-800 text-purple-300'
+                                    : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'
+                                }`}
+                              >
+                                {expiry.text}
+                              </span>
+                            </div>
 
-              <button
-                type="submit"
-                disabled={uploadingSponsor}
-                className="w-full mt-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-xl shadow-lg hover:from-purple-500 hover:to-pink-500 transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
-              >
-                {uploadingSponsor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Megaphone className="w-4 h-4" />}
-                <span>{uploadingSponsor ? 'Uploading Banner...' : 'Publish Sponsor Banner Live'}</span>
-              </button>
-            </form>
+                            {sp.link_url && (
+                              <p className="text-xs text-purple-400 truncate mb-2">
+                                Link: <span className="underline">{sp.link_url}</span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="p-4 bg-slate-950/60 border-t border-slate-800/80 flex items-center justify-between">
+                          <span className="text-[10px] text-slate-500">
+                            Posted: {new Date(sp.created_at).toLocaleDateString()}
+                          </span>
+
+                          <button
+                            onClick={() => handleDeleteSponsor(sp.id, sp.name)}
+                            className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 bg-rose-950/50 hover:bg-rose-900/60 border border-rose-800/40 px-3 py-1.5 rounded-xl transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete Ad
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
