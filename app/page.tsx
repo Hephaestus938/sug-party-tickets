@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ShieldCheck, Zap, MessageSquare, ArrowRight, Sparkles } from 'lucide-react';
+import SponsorBanner from '@/components/SponsorBanner';
 
 export default function Home() {
   return (
@@ -8,7 +9,6 @@ export default function Home() {
       {/* Navigation Bar */}
       <nav className="w-full max-w-7xl mx-auto px-6 py-6 flex justify-between items-center z-10">
         <div className="flex items-center gap-3">
-          {/* COMMENT: Displaying your brand-new transparent UNIZIK logo */}
           <div className="w-10 h-10 flex items-center justify-center">
             <img 
               src="/logo.png" 
@@ -16,7 +16,6 @@ export default function Home() {
               className="w-full h-full object-contain filter drop-shadow-[0_0_10px_rgba(147,51,234,0.3)]"
             />
           </div>
-          {/* COMMENT: Name changed to Unizik Party Hub */}
           <span className="font-black text-xl tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
             UNIZIK PARTY HUB
           </span>
@@ -91,6 +90,11 @@ export default function Home() {
             Once approved, administrators connect with you directly via WhatsApp to coordinate your ticket collection time and venue.
           </p>
         </div>
+      </section>
+      
+      {/* Sponsor / Ad Placement Section */}
+      <section className="max-w-6xl mx-auto px-6 w-full pb-12">
+        <SponsorBanner />
       </section>
 
       {/* Page Footer */}

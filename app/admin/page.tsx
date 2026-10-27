@@ -21,7 +21,8 @@ import {
   Trash2,
   AlertCircle,
   Ticket,
-  LogOut
+  LogOut,
+  Megaphone
 } from 'lucide-react';
 
 // ==========================================
@@ -72,7 +73,7 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 
 export default function AdminPage() {
   // ==========================================
-  // STATE MANAGEMENT
+  // STATE MANAGEMENT (INSIDE COMPONENT BODY)
   // ==========================================
 
   // Authentication State
@@ -83,7 +84,7 @@ export default function AdminPage() {
   const [checkingSession, setCheckingSession] = useState(true);
 
   // Dashboard Tabs & Data State
-  const [activeTab, setActiveTab] = useState<'registrations' | 'manage-events' | 'create-event'>('registrations');
+  const [activeTab, setActiveTab] = useState<'registrations' | 'manage-events' | 'create-event' | 'sponsors'>('registrations');
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [loadingRegistrations, setLoadingRegistrations] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
@@ -104,6 +105,13 @@ export default function AdminPage() {
   const [flyerFile, setFlyerFile] = useState<File | null>(null);
   const [creatingEvent, setCreatingEvent] = useState(false);
   const [eventSuccess, setEventSuccess] = useState(false);
+
+  // Sponsor / Ad Placement State
+  const [sponsorName, setSponsorName] = useState('');
+  const [sponsorLink, setSponsorLink] = useState('');
+  const [sponsorCategory, setSponsorCategory] = useState('Campus Business');
+  const [sponsorFile, setSponsorFile] = useState<File | null>(null);
+  const [uploadingSponsor, setUploadingSponsor] = useState(false);
 
   // Check and listen for active Supabase Auth sessions
   useEffect(() => {
@@ -296,7 +304,46 @@ export default function AdminPage() {
     }
   }
 
-  // 8. Countdown calculator
+  // 8. Publish Sponsor / Campus Ad
+  async function handleCreateSponsor(e: React.FormEvent) {
+    e.preventDefault();
+    if (!sponsorFile) return alert('Please upload a banner image');
+
+    setUploadingSponsor(true);
+    try {
+      const fileExt = sponsorFile.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage.from('sponsors').upload(fileName, sponsorFile);
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage.from('sponsors').getPublicUrl(fileName);
+
+      const { error: insertError } = await supabase.from('sponsors').insert([
+        {
+          name: sponsorName,
+          link_url: sponsorLink || null,
+          category: sponsorCategory,
+          banner_url: publicUrlData.publicUrl,
+          is_active: true,
+        },
+      ]);
+
+      if (insertError) throw insertError;
+
+      alert('Sponsor banner published successfully!');
+      setSponsorName('');
+      setSponsorLink('');
+      setSponsorFile(null);
+    } catch (err) {
+      console.error('Error publishing sponsor:', err);
+      alert('Failed to publish sponsor banner.');
+    } finally {
+      setUploadingSponsor(false);
+    }
+  }
+
+  // 9. Countdown calculator
   function getTimeRemaining(dateStr: string, timeStr: string) {
     if (!dateStr) return { text: 'Scheduled', isExpired: false, isNear: false };
 
@@ -454,6 +501,17 @@ export default function AdminPage() {
               Post New Event
             </button>
             <button
+              onClick={() => setActiveTab('sponsors')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'sponsors'
+                  ? 'bg-purple-600 text-white shadow-lg'
+                  : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+              Manage Ads
+            </button>
+            <button
               onClick={handleLogout}
               className="bg-rose-950/60 border border-rose-800/40 hover:bg-rose-900 px-3 py-2 rounded-xl text-xs text-rose-300 font-semibold flex items-center gap-1.5"
             >
@@ -577,7 +635,6 @@ export default function AdminPage() {
                           </div>
                         )}
 
-                        {/* REJECTED WITH WHATSAPP NOTIFICATION LINK */}
                         {reg.status === 'rejected' && (
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-rose-400 bg-rose-950/80 px-3 py-1.5 rounded-xl border border-rose-800">
@@ -860,6 +917,79 @@ export default function AdminPage() {
               >
                 {creatingEvent ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 <span>{creatingEvent ? 'Publishing Event...' : 'Publish Event Live'}</span>
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* TAB 4: MANAGE ADS & SPONSORS */}
+        {activeTab === 'sponsors' && (
+          <div className="max-w-2xl mx-auto bg-slate-900/90 border border-purple-800/50 rounded-3xl p-6 md:p-8 shadow-2xl">
+            <h2 className="text-xl font-bold mb-1 flex items-center gap-2">
+              <Megaphone className="w-5 h-5 text-amber-400" />
+              Publish Campus Ad / Sponsor Banner
+            </h2>
+            <p className="text-slate-400 text-xs mb-6">Upload partner business graphic banners to display on student portal pages.</p>
+
+            <form onSubmit={handleCreateSponsor} className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 mb-1 font-medium">Business / Partner Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={sponsorName}
+                    onChange={(e) => setSponsorName(e.target.value)}
+                    placeholder="e.g. Ifite Campus Lounge"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1 font-medium">Category</label>
+                  <select
+                    value={sponsorCategory}
+                    onChange={(e) => setSponsorCategory(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="Campus Business">Campus Business</option>
+                    <option value="Food & Drinks">Food & Drinks</option>
+                    <option value="Hostel & Rentals">Hostel & Rentals</option>
+                    <option value="Shuttle & Logistics">Shuttle & Logistics</option>
+                    <option value="Brand Partner">Brand Partner</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-medium">Website or WhatsApp Link (Optional)</label>
+                <input
+                  type="url"
+                  value={sponsorLink}
+                  onChange={(e) => setSponsorLink(e.target.value)}
+                  placeholder="https://wa.me/2348012345678"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-medium">Banner Image Graphic</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  required
+                  onChange={(e) => setSponsorFile(e.target.files?.[0] || null)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-purple-900/60 file:text-purple-300 hover:file:bg-purple-800"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={uploadingSponsor}
+                className="w-full mt-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold py-3 rounded-xl shadow-lg hover:from-purple-500 hover:to-pink-500 transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
+              >
+                {uploadingSponsor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Megaphone className="w-4 h-4" />}
+                <span>{uploadingSponsor ? 'Uploading Banner...' : 'Publish Sponsor Banner Live'}</span>
               </button>
             </form>
           </div>
