@@ -10,6 +10,7 @@ interface Sponsor {
   banner_url: string;
   link_url: string | null;
   category: string;
+  expires_at: string | null;
 }
 
 export default function SponsorBanner() {
@@ -21,12 +22,18 @@ export default function SponsorBanner() {
       try {
         const { data, error } = await supabase
           .from('sponsors')
-          .select('id, name, banner_url, link_url, category')
+          .select('id, name, banner_url, link_url, category, expires_at')
           .eq('is_active', true)
           .order('created_at', { ascending: false });
 
         if (!error && data) {
-          setSponsors(data);
+          // Filter out ads that have passed their expiration date
+          const now = new Date();
+          const validSponsors = data.filter((item) => {
+            if (!item.expires_at) return true;
+            return new Date(item.expires_at) > now;
+          });
+          setSponsors(validSponsors);
         }
       } catch (err) {
         console.error('Error loading sponsors:', err);
